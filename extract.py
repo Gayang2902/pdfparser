@@ -319,37 +319,17 @@ def extract_pdf(
 
 
 def _build_guide(source: Path, section: str, n: int, tier3_images: list) -> str:
-    img_section = ""
     if tier3_images:
-        img_list = "\n".join(f"  - {p}" for p in tier3_images)
-        img_section = f"""
-## Tier3 이미지 목록
-다음 이미지는 텍스트로 추출되지 않아 직접 시각 확인이 필요합니다.
-content.md 내 `[IMG: path]` 태그 위치에서 해당 이미지를 함께 해석하세요.
-
-{img_list}
-"""
+        img_list = "\n".join(f"- {p}" for p in tier3_images)
+        img_section = f"\n시각 확인 필요 이미지:\n{img_list}"
     else:
-        img_section = "\n## 이미지\n이 문서는 에이전트가 확인해야 할 이미지가 없습니다. content.md만 읽으면 됩니다.\n"
+        img_section = "\n이미지 없음 — content.md만 읽으면 됩니다."
 
-    return f"""# 에이전트 독서 가이드
-
-## 문서 정보
-- 원본: {source.name}
-- {section} 수: {n}
-
-## 파일 구성
-- `content.md` — 전체 텍스트 (메인 읽기 대상)
-- `images/` — Tier3 이미지 파일 (직접 확인 필요한 것만)
-- `manifest.json` — 구조 메타데이터
-- `GUIDE.md` — 이 파일
-
-## 읽기 방법
-1. `content.md`를 처음부터 순서대로 읽는다
-2. 코드블록(` ``` `)은 이미지에서 추출한 텍스트이므로 그대로 읽는다
-3. `[IMG: images/xxx.png]` 태그를 만나면 해당 이미지 파일을 로드해서 함께 해석한다
-4. 태그가 없는 구간은 텍스트만으로 충분히 이해 가능하다
-{img_section}"""
+    return (
+        f"원본: {source.name} | {section}: {n}\n"
+        f"읽기: content.md → `[IMG: path]` 태그 위치에서 해당 이미지 로드"
+        f"{img_section}"
+    )
 
 
 def _save_temp_pix(pix) -> Path:
