@@ -9,7 +9,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from extract import (
     _detect_pdf_headings,
     _is_duplicate_of_page,
+    _is_fragmented_text,
     _is_meaningful_text,
+    _is_valid_table,
     _join_bullets,
     _resolve_files,
     _rows_to_markdown,
@@ -68,6 +70,50 @@ class TestIsDuplicateOfPage:
     def test_short_text_not_duplicate(self):
         page_words = {"a", "b", "c"}
         assert _is_duplicate_of_page("a b", page_words) is False
+
+
+class TestIsFragmentedText:
+    def test_split_korean_text_detected(self):
+        cells = [
+            ["취약점 개요 및 발", "생 원인"],
+            ["3. 취약점 공격 시", "나리오"],
+        ]
+        assert _is_fragmented_text(cells) is True
+
+    def test_split_english_text_detected(self):
+        cells = [
+            ["Django ORM (Object-Relat", "ional Ma"],
+            ["The vulnerability allow", "s injection"],
+        ]
+        assert _is_fragmented_text(cells) is True
+
+    def test_real_table_not_fragmented(self):
+        cells = [
+            ["구성 요소", "버전", "비고"],
+            ["Django", "4.2", "정상"],
+            ["Python", "3.11", "확인필요"],
+        ]
+        assert _is_fragmented_text(cells) is False
+
+    def test_empty_cells_not_fragmented(self):
+        cells = [["", ""], ["", ""]]
+        assert _is_fragmented_text(cells) is False
+
+    def test_valid_table_rejects_text_strategy_fragment(self):
+        cells = [
+            ["취약점 개요 및 발", "생 원인"],
+            ["3. 취약점 공격 시", "나리오"],
+            ["추가 내용이 여기 들", "어갑니다"],
+        ]
+        assert _is_valid_table(cells, (0, 0, 200, 300), 500000, strategy="text") is False
+
+    def test_valid_table_accepts_text_strategy_real(self):
+        cells = [
+            ["항목", "값"],
+            ["Django", "4.2"],
+            ["Python", "3.11"],
+        ]
+        assert _is_valid_table(cells, (0, 0, 200, 300), 500000, strategy="text") is True
 
 
 class TestRowsToMarkdown:

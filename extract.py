@@ -108,7 +108,48 @@ def _ocr_from_pixmap(pix, warn: bool = False) -> str:
         tmp.unlink(missing_ok=True)
 
 
-def _is_valid_table(cells: list, bbox: tuple, page_area: float) -> bool:
+def _is_fragmented_text(cells: list) -> bool:
+    """text 전략이 일반 문장을 열 경계에서 잘라 만든 가짜 표인지 판별."""
+    frag_rows = 0
+    checked = 0
+    for row in cells:
+        filled = [str(c).strip() for c in row if c and str(c).strip()]
+        if len(filled) < 2:
+            continue
+        checked += 1
+        broken = 0
+        for i in range(len(filled) - 1):
+            left = filled[i]
+            right = filled[i + 1]
+            if not left or not right:
+                continue
+            lc, rc = left[-1], right[0]
+            lc_kr = "가" <= lc <= "힣"
+            rc_kr = "가" <= rc <= "힣"
+            lc_en = lc.isascii() and lc.isalpha()
+            rc_en = rc.isascii() and rc.isalpha()
+            left_words = len(left.split())
+            last_token = left.split()[-1]
+            # 한글: 마지막 토큰 1글자 → 단어 중간 절단 (발→생)
+            if lc_kr and rc_kr and len(last_token) == 1:
+                broken += 1
+            # 영어: 소문자 연속 + 문장 맥락(3단어 이상) (Relat→ional)
+            elif lc_en and rc_en and rc.islower() and left_words >= 3:
+                broken += 1
+            # 영어: 마지막 토큰 1글자 + 알파벳 연속 (S→QL)
+            elif lc_en and rc_en and len(last_token) == 1:
+                broken += 1
+            # 이종 문자: 문장 맥락(3단어 이상)에서 한영 혼합 (SQL→구조를)
+            elif ((lc_en and rc_kr) or (lc_kr and rc_en)) and left_words >= 3:
+                broken += 1
+        if broken > 0:
+            frag_rows += 1
+    if checked == 0:
+        return False
+    return frag_rows / checked >= 0.3
+
+
+def _is_valid_table(cells: list, bbox: tuple, page_area: float, strategy: str = "") -> bool:
     if not cells or not cells[0]:
         return False
     nrows = len(cells)
@@ -124,6 +165,8 @@ def _is_valid_table(cells: list, bbox: tuple, page_area: float) -> bool:
     total = nrows * ncols
     filled = sum(1 for row in cells for c in row if c and str(c).strip())
     if total > 0 and filled / total < 0.3:
+        return False
+    if strategy == "text" and _is_fragmented_text(cells):
         return False
     return True
 
@@ -370,15 +413,18 @@ def extract_pdf(
             table_entries = []
             try:
                 found = list(page.find_tables(strategy="lines_strict"))
+                used_strategy = "lines_strict"
                 if not found:
                     found = list(page.find_tables())
+                    used_strategy = "lines"
                 if not found:
                     max_w = page_rect.width * 0.6
                     found = [t for t in page.find_tables(strategy="text")
                              if (t.bbox[2] - t.bbox[0]) < max_w]
+                    used_strategy = "text"
                 for table in found:
                     cells = table.extract()
-                    if not _is_valid_table(cells, table.bbox, page_area):
+                    if not _is_valid_table(cells, table.bbox, page_area, strategy=used_strategy):
                         continue
                     rect = fitz.Rect(table.bbox)
                     table_rects.append(rect)
