@@ -368,7 +368,7 @@ def extract_pdf(
             table_rects = []
             table_entries = []
             try:
-                for table in page.find_tables():
+                for table in page.find_tables(strategy="lines_strict"):
                     cells = table.extract()
                     if not _is_valid_table(cells, table.bbox, page_area):
                         continue
@@ -396,6 +396,25 @@ def extract_pdf(
                             break
                 if not overlaps:
                     text_entries.append((b[1], b[4].strip()))
+
+            # 텍스트 블록 �� 테이블 셀 내용 중복 제거
+            if table_entries:
+                cell_values = set()
+                for _, rows in table_entries:
+                    for row in rows:
+                        for cell in row:
+                            v = " ".join(str(cell).split())
+                            if len(v) >= 3:
+                                cell_values.add(v)
+                deduped = []
+                for y, text in text_entries:
+                    normalized = " ".join(text.split())
+                    if normalized in cell_values:
+                        continue
+                    if any(normalized in cv for cv in cell_values if len(normalized) >= 5):
+                        continue
+                    deduped.append((y, text))
+                text_entries = deduped
 
             # Y좌표 기준으로 텍스트·표 병합
             lines = [f"## [P{page_idx}]"]
