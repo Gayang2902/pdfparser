@@ -344,27 +344,64 @@ def extract_pdf(
             page_rect = page.rect
             page_area = page_rect.width * page_rect.height
 
-            raw = [b[4].strip() for b in page.get_text("blocks", sort=True) if b[6] == 0 and b[4].strip()]
-            cleaned = _join_bullets(raw)
-            cleaned = _detect_pdf_headings(page, cleaned)
-            page_words = set(" ".join(cleaned).split())
-
-            lines = [f"## [P{page_idx}]"]
-            lines.extend(cleaned)
-
-            # 표 추출
+            # 표 영역 감지 (텍스트 추출 전에 먼저 수행)
+            table_rects = []
+            table_entries = []
             try:
-                tables = page.find_tables()
-                for table in tables:
+                for table in page.find_tables():
+                    rect = fitz.Rect(table.bbox)
+                    table_rects.append(rect)
                     cells = table.extract()
                     rows = [[c or "" for c in row] for row in cells]
-                    md_table = _rows_to_markdown(rows)
+                    if any(any(str(c).strip() for c in row) for row in rows):
+                        table_entries.append((rect.y0, rows))
+            except Exception:
+                pass
+
+            # 텍스트 블록 추출 — 표 영역과 겹치는 블록 제외
+            text_entries = []
+            for b in page.get_text("blocks", sort=True):
+                if b[6] != 0 or not b[4].strip():
+                    continue
+                br = fitz.Rect(b[:4])
+                overlaps = False
+                for tr in table_rects:
+                    overlap = br & tr
+                    if not overlap.is_empty:
+                        block_area = max(br.width * br.height, 1)
+                        if (overlap.width * overlap.height) / block_area > 0.5:
+                            overlaps = True
+                            break
+                if not overlaps:
+                    text_entries.append((b[1], b[4].strip()))
+
+            # Y좌표 기준으로 텍스트·표 병합
+            lines = [f"## [P{page_idx}]"]
+            all_items = [(y, "text", data) for y, data in text_entries] + \
+                        [(y, "table", data) for y, data in table_entries]
+            all_items.sort(key=lambda x: x[0])
+
+            text_buf = []
+            for _, kind, data in all_items:
+                if kind == "text":
+                    text_buf.append(data)
+                else:
+                    if text_buf:
+                        cleaned = _join_bullets(text_buf)
+                        cleaned = _detect_pdf_headings(page, cleaned)
+                        lines.extend(cleaned)
+                        text_buf = []
+                    md_table = _rows_to_markdown(data)
                     if md_table:
                         lines.append(f"\n{md_table}")
                         table_count += 1
                         page_info["tables"] += 1
-            except Exception:
-                pass
+            if text_buf:
+                cleaned = _join_bullets(text_buf)
+                cleaned = _detect_pdf_headings(page, cleaned)
+                lines.extend(cleaned)
+
+            page_words = set(" ".join(lines).split())
 
             # 이미지
             try:
