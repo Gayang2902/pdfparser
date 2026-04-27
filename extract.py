@@ -108,6 +108,26 @@ def _ocr_from_pixmap(pix, warn: bool = False) -> str:
         tmp.unlink(missing_ok=True)
 
 
+def _is_valid_table(cells: list, bbox: tuple, page_area: float) -> bool:
+    if not cells or not cells[0]:
+        return False
+    nrows = len(cells)
+    ncols = len(cells[0])
+    if nrows < 2:
+        return False
+    if ncols > max(nrows * 8, 10):
+        return False
+    w = bbox[2] - bbox[0]
+    h = bbox[3] - bbox[1]
+    if page_area > 0 and (w * h) / page_area < 0.01:
+        return False
+    total = nrows * ncols
+    filled = sum(1 for row in cells for c in row if c and str(c).strip())
+    if total > 0 and filled / total < 0.3:
+        return False
+    return True
+
+
 def _rows_to_markdown(rows: list) -> str:
     if not rows or not rows[0]:
         return ""
@@ -349,9 +369,11 @@ def extract_pdf(
             table_entries = []
             try:
                 for table in page.find_tables():
+                    cells = table.extract()
+                    if not _is_valid_table(cells, table.bbox, page_area):
+                        continue
                     rect = fitz.Rect(table.bbox)
                     table_rects.append(rect)
-                    cells = table.extract()
                     rows = [[c or "" for c in row] for row in cells]
                     if any(any(str(c).strip() for c in row) for row in rows):
                         table_entries.append((rect.y0, rows))
