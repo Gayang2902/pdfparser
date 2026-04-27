@@ -365,10 +365,14 @@ def extract_pdf(
             page_area = page_rect.width * page_rect.height
 
             # 표 영역 감지 (텍스트 추출 전에 먼저 수행)
+            # lines_strict → 테두리 명확한 표 우선, 없으면 default fallback
             table_rects = []
             table_entries = []
             try:
-                for table in page.find_tables(strategy="lines_strict"):
+                found = list(page.find_tables(strategy="lines_strict"))
+                if not found:
+                    found = list(page.find_tables())
+                for table in found:
                     cells = table.extract()
                     if not _is_valid_table(cells, table.bbox, page_area):
                         continue
@@ -498,6 +502,17 @@ def extract_pdf(
                     page_info["images"].append({"id": img_name, "tier": 3, "path": f"images/{img_name}"})
 
                 img_count += 1
+
+            # 빈 페이지 fallback: 텍스트·이미지 모두 없으면 전체 페이지를 Tier3 렌더링
+            has_content = len(lines) > 1 or page_info.get("images") or page_info.get("tables")
+            if not has_content:
+                pix = page.get_pixmap(matrix=fitz.Matrix(render_scale, render_scale))
+                img_name = f"page_{page_idx}_full.png"
+                img_path = img_dir / img_name
+                pix.save(str(img_path))
+                lines.append(f"\n[IMG: images/{img_name}]")
+                tier3_images.append(f"images/{img_name}")
+                page_info["images"].append({"id": img_name, "tier": 3, "path": f"images/{img_name}"})
 
             pages_md.append("\n".join(lines))
             manifest["pages"].append(page_info)
