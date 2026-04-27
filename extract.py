@@ -365,13 +365,17 @@ def extract_pdf(
             page_area = page_rect.width * page_rect.height
 
             # 표 영역 감지 (텍스트 추출 전에 먼저 수행)
-            # lines_strict → 테두리 명확한 표 우선, 없으면 default fallback
+            # 3단계: lines_strict → default → text (좁은 표만)
             table_rects = []
             table_entries = []
             try:
                 found = list(page.find_tables(strategy="lines_strict"))
                 if not found:
                     found = list(page.find_tables())
+                if not found:
+                    max_w = page_rect.width * 0.6
+                    found = [t for t in page.find_tables(strategy="text")
+                             if (t.bbox[2] - t.bbox[0]) < max_w]
                 for table in found:
                     cells = table.extract()
                     if not _is_valid_table(cells, table.bbox, page_area):
@@ -401,23 +405,30 @@ def extract_pdf(
                 if not overlaps:
                     text_entries.append((b[1], b[4].strip()))
 
-            # 텍스트 블록 �� 테이블 셀 내용 중복 제거
+            # 텍스트 블록 내 테이블 셀 내용을 줄 단위로 제거
             if table_entries:
                 cell_values = set()
                 for _, rows in table_entries:
                     for row in rows:
                         for cell in row:
                             v = " ".join(str(cell).split())
-                            if len(v) >= 3:
+                            if len(v) >= 2:
                                 cell_values.add(v)
                 deduped = []
                 for y, text in text_entries:
-                    normalized = " ".join(text.split())
-                    if normalized in cell_values:
-                        continue
-                    if any(normalized in cv for cv in cell_values if len(normalized) >= 5):
-                        continue
-                    deduped.append((y, text))
+                    filtered_lines = []
+                    for line in text.split("\n"):
+                        norm = " ".join(line.split())
+                        if not norm:
+                            continue
+                        if norm in cell_values:
+                            continue
+                        if any(norm in cv for cv in cell_values if len(norm) >= 5):
+                            continue
+                        filtered_lines.append(line)
+                    remaining = "\n".join(filtered_lines).strip()
+                    if remaining:
+                        deduped.append((y, remaining))
                 text_entries = deduped
 
             # Y좌표 기준으로 텍스트·표 병합
